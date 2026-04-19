@@ -1820,7 +1820,7 @@ async function handleOAuthCallback() {
   // Token exchange via local proxy (avoids CORS)
   // proxy.py must be running: python3 proxy.py
   try {
-    const res = await fetch('http://localhost:8081/token', {
+    const res = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instance, code, clientId, redirectUri, verifier }),
