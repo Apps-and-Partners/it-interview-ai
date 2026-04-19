@@ -860,23 +860,7 @@ h1,h2,h3,.title-font { font-family: 'Fredoka One', cursive; }
     <p>会話はブラウザ内でのみ使用します。外部保存はありません。</p>
   </div>
 
-  <div class="api-section">
-    <h3>🔑 APIキー設定</h3>
-    <div class="input-group">
-      <label>Anthropic API キー <span style="color:red">*必須</span></label>
-      <div class="input-row">
-        <input type="password" id="anthKey" placeholder="sk-ant-...">
-        <button class="toggle-eye" onclick="toggleEye('anthKey',this)">👁</button>
-      </div>
-    </div>
-    <div class="input-group">
-      <label>OpenAI API キー <span class="optional-tag">任意・未入力でもOK</span></label>
-      <div class="input-row">
-        <input type="password" id="oaiKey" placeholder="sk-...（未入力時はブラウザ音声）">
-        <button class="toggle-eye" onclick="toggleEye('oaiKey',this)">👁</button>
-      </div>
-    </div>
-  </div>
+
 
   <div style="width:100%;max-width:700px;margin-bottom:16px;">
     <div class="select-header" style="margin-bottom:16px;text-align:left;">
@@ -1115,7 +1099,7 @@ const INTERVIEWERS = [
 ];
 
 const S = {
-  iv: null, key: '', oaiKey: '',
+  iv: null,
   stream: null, mr: null, ch: [], blobs: [],
   isRec: false, recog: null, tr: '', conv: [],
   sec: 'a', timer: null, el: 0,
@@ -1140,18 +1124,12 @@ function selectIV(idx, card) {
   document.querySelectorAll('.iv-card').forEach(c => c.classList.remove('selected'));
   card.classList.add('selected');
   S.iv = INTERVIEWERS[idx];
-  const key = document.getElementById('anthKey').value.trim();
-  document.getElementById('btnNext').disabled = !key;
+  document.getElementById('btnNext').disabled = false;
 }
 
-document.getElementById('anthKey').addEventListener('input', function() {
-  document.getElementById('btnNext').disabled = !this.value.trim() || !S.iv;
-});
+
 
 function goToMic() {
-  S.key = document.getElementById('anthKey').value.trim();
-  S.oaiKey = document.getElementById('oaiKey').value.trim();
-  if (!S.key) { alert('Anthropic APIキーを入力してください'); return; }
   if (!S.iv) { alert('面接官を選択してください'); return; }
   showScreen('mic');
 }
@@ -1351,13 +1329,10 @@ async function sendToAI(userText, isFirst) {
   const typingId = addTyping();
   try {
     const messages = buildMessages(isFirst ? null : userText);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/anthropic', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': S.key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
@@ -1538,19 +1513,13 @@ function setRate(r, btn) {
 // Phase 1: fires TTS fetch+decode immediately (call as soon as text is known).
 //          Returns a Promise<{type,ctx?,buf?,text?}> — does NOT play yet.
 function prepareAudio(text) {
-  const oaiKey = document.getElementById('oaiKey').value.trim();
-  if (!oaiKey) return Promise.resolve({ type: 'browser', text });
-
-  // Create AudioContext up-front so it's ready when data arrives
+  // Always use Worker TTS (API key is stored in Cloudflare Worker env vars)
   const ctx = new AudioContext();
 
-  return fetch('https://api.openai.com/v1/audio/speech', {
+  return fetch('https://sf-token-proxy.shunsuke8710.workers.dev/tts', {
     method: 'POST',
-    mode: 'cors',
-    credentials: 'omit',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${oaiKey}`
     },
     body: JSON.stringify({
       model: 'tts-1',
@@ -1648,13 +1617,10 @@ async function endInterview() {
 
 async function scoreInterview() {
   const convText = S.conv.map(c => `${c.r==='a'?'面接官':'応募者'}：${c.c}`).join('\n');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/anthropic', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': S.key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-5',
