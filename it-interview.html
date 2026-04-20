@@ -934,6 +934,9 @@ h1,h2,h3,.title-font { font-family: 'Fredoka One', cursive; }
       <div class="prog-item" id="prog-c">
         <div class="prog-dot"></div>Section C：IT経験
       </div>
+      <div class="prog-item" id="prog-d">
+        <div class="prog-dot"></div>Section D：勤務希望
+      </div>
     </div>
     <hr class="sidebar-divider">
     <div class="sidebar-label">経過時間</div>
@@ -1068,13 +1071,17 @@ h1,h2,h3,.title-font { font-family: 'Fredoka One', cursive; }
 // ===== STATE =====
 const INTERVIEWERS = [
   { id: 0, name: '田中 誠一', role: 'ITインフラ部長', gender: 'male', voice: 'onyx',
-    persona: `あなたは田中誠一、50代のITインフラ部長です。厳格で論理的。「〜ですね。では〜は？」と要点を畳み掛けるスタイル。敬語を使いながらも、核心を突く質問をします。` },
+    persona: `あなたは田中誠一、50代のITインフラ部長です。厳格で論理的。「〜ですね。では〜は？」と要点を畳み掛けるスタイル。敬語を使いながらも、核心を突く質問をします。`,
+    greeting: `田中です。本日はITレベル判定面談をご担当いたします。3つのテーマに沿って順番にお聞きしますので、わかる範囲で率直にお答えください。では早速始めましょう。` },
   { id: 1, name: '山田 健太', role: 'エンジニアリングMgr', gender: 'male', voice: 'echo',
-    persona: `あなたは山田健太、30代のエンジニアリングマネージャーです。フレンドリーで好奇心旺盛。「なるほど！それって〜？」と共感しながら深掘りするスタイル。テンション高めで親しみやすい。` },
+    persona: `あなたは山田健太、30代のエンジニアリングマネージャーです。フレンドリーで好奇心旺盛。「なるほど！それって〜？」と共感しながら深掘りするスタイル。テンション高めで親しみやすい。`,
+    greeting: `やあ、こんにちは！山田です。今日はざっくばらんに話しましょう。ITのことをいくつか聞かせてもらいますね。難しいことは気にせず、知ってることを教えてもらえれば十分です！` },
   { id: 2, name: '鈴木 あかり', role: '人事×DX推進担当', gender: 'female', voice: 'nova',
-    persona: `あなたは鈴木あかり、30代の人事×DX推進担当です。丁寧で共感力が高め。「〜についてはいかがでしょうか？」と穏やかに誘導するスタイル。受験者をリラックスさせながら話を引き出します。` },
+    persona: `あなたは鈴木あかり、30代の人事×DX推進担当です。丁寧で共感力が高め。「〜についてはいかがでしょうか？」と穏やかに誘導するスタイル。受験者をリラックスさせながら話を引き出します。`,
+    greeting: `本日はお時間をいただきありがとうございます。鈴木と申します。リラックスしてお話しいただけると嬉しいです。3つのテーマで、ご経験やお考えを伺っていきますね。` },
   { id: 3, name: '中村 美咲', role: 'システム開発部 シニアSE', gender: 'female', voice: 'shimmer',
-    persona: `あなたは中村美咲、40代のシステム開発部シニアSEです。冷静で分析的、褒め上手。「それは面白い経験ですね。具体的には〜？」と掘り下げるスタイル。論理的に会話を組み立てます。` }
+    persona: `あなたは中村美咲、40代のシステム開発部シニアSEです。冷静で分析的、褒め上手。「それは面白い経験ですね。具体的には〜？」と掘り下げるスタイル。論理的に会話を組み立てます。`,
+    greeting: `中村です。本日はITスキルの確認面談をさせていただきます。3つのセクションに分けて進めますので、ご自身の経験や知識を率直に教えていただければ大丈夫です。では始めましょう。` }
 ];
 
 const S = {
@@ -1191,20 +1198,80 @@ function startInterview() {
   showScreen('interview');
   // Start SpeechRecognition now (mic already granted — no popup)
   setupSpeechRecognition();
-  // First AI message
-  sendToAI('こんにちは。面談をよろしくお願いします。', true);
+  // ① Show fixed greeting immediately (no API wait), then prefetch first question
+  startWithGreeting();
+}
+
+async function startWithGreeting() {
+  const greeting = S.iv.greeting;
+  // Register greeting in conversation history as assistant turn
+  S.conv.push({ r: 'a', c: greeting });
+
+  // Fire first question API request in background immediately
+  const firstQPromise = fetchFirstQuestion();
+
+  // Display greeting + play TTS (in parallel with API fetch above)
+  const audioReady = prepareAudio(greeting);
+  await playPreparedAudio(audioReady, greeting, () => {
+    addMsg('assistant', greeting);
+  });
+
+  // Now wait for first question (likely already done by now)
+  S.wait = true;
+  setInputDisabled(true);
+  const typingId = addTyping();
+  try {
+    const firstQ = await firstQPromise;
+    removeTyping(typingId);
+    const audioReady2 = prepareAudio(firstQ);
+    S.conv.push({ r: 'a', c: firstQ });
+    await playPreparedAudio(audioReady2, firstQ, () => {
+      addMsg('assistant', firstQ);
+    });
+  } catch(e) {
+    removeTyping(typingId);
+    addMsg('assistant', '⚠️ 最初の質問の取得に失敗しました: ' + e.message);
+  }
+  S.wait = false;
+  setInputDisabled(false);
+  showMicHint();
+}
+
+async function fetchFirstQuestion() {
+  const messages = [
+    { role: 'user', content: 'こんにちは。面談をよろしくお願いします。' },
+    { role: 'assistant', content: S.iv.greeting },
+    { role: 'user', content: 'よろしくお願いします。' }
+  ];
+  const res = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/anthropic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 400,
+      system: buildSystemPrompt(),
+      messages
+    })
+  });
+  if (!res.ok) throw new Error('API Error ' + res.status);
+  const data = await res.json();
+  const q = (data.content[0].text || '').trim();
+  // Register in conv so subsequent turns are consistent
+  S.conv.push({ r: 'u', c: 'よろしくお願いします。' });
+  return q;
 }
 
 // ===== PROGRESS =====
 function updateProgress(sec) {
   S.sec = sec;
-  ['a','b','c'].forEach(s => {
+  ['a','b','c','d'].forEach(s => {
     const el = document.getElementById('prog-' + s);
+    if (!el) return;
     el.classList.remove('active','done');
     if (s === sec) el.classList.add('active');
     else if (s < sec) el.classList.add('done');
   });
-  const labels = { a: 'Section A', b: 'Section B', c: 'Section C' };
+  const labels = { a: 'Section A', b: 'Section B', c: 'Section C', d: 'Section D' };
   document.getElementById('sectionTag').textContent = labels[sec] || 'Section A';
 }
 
@@ -1331,6 +1398,7 @@ async function sendToAI(userText, isFirst) {
     let displayContent = content
       .replace('[SECTION_CHANGE: B]', '')
       .replace('[SECTION_CHANGE: C]', '')
+      .replace('[SECTION_CHANGE: D]', '')
       .replace('[INTERVIEW_END]', '')
       .trim();
 
@@ -1342,6 +1410,8 @@ async function sendToAI(userText, isFirst) {
       setTimeout(() => { updateProgress('b'); addSectionDivider('Section B へ'); }, 300);
     else if (content.includes('[SECTION_CHANGE: C]'))
       setTimeout(() => { updateProgress('c'); addSectionDivider('Section C へ'); }, 300);
+    else if (content.includes('[SECTION_CHANGE: D]'))
+      setTimeout(() => { updateProgress('d'); addSectionDivider('Section D へ'); }, 300);
     const isEnd = content.includes('[INTERVIEW_END]');
     S.conv.push({ r: 'a', c: content });
 
@@ -1378,25 +1448,47 @@ function clearMicHint() {
 
 function buildSystemPrompt() {
   const iv = S.iv;
+  const elapsed = S.el; // seconds elapsed
+
+  // ② Timer-based hints to keep interview around 12 minutes
+  let timerHint = '';
+  if (elapsed >= 660 && elapsed < 720) { // 11〜12分
+    timerHint = '
+
+## 時間の目安
+残り時間がわずかです。現在のセクションを手短に締めて次へ進んでください。';
+  } else if (elapsed >= 720) { // 12分以上
+    timerHint = '
+
+## 時間の目安
+まもなく終了です。Section Cが未完なら簡潔に終え、Section Dへ移行するか [INTERVIEW_END] に向かってください。';
+  } else if (elapsed >= 540) { // 9〜11分
+    timerHint = '
+
+## 時間の目安
+残り時間が少なくなっています。各セクションはコンパクトにまとめてください。';
+  }
+
   return `あなたはITレベル判定面談の面接官です。
 ${iv.persona}
 
 ## 面談ルール
-- 全体約15分、3セクション順番に行います
-- 各セクションで2〜4回の質問（深掘り含む）
-- 回答が短い場合は「もう少し詳しく教えてください」と深掘り
+- 全体12分を目安に、4セクション順番に行います
+- 各セクションで最大3問（深掘り1回含む）、合計12問以内
+- 回答が短い場合のみ「もう少し詳しく教えてください」と1回だけ深掘り
 - セクション移行時は「では次のテーマに移りますね」と告知
-- 1回の発話は100〜180文字以内で簡潔に
+- 1回の発話は100〜150文字以内で簡潔に
 
 ## セクション内容
-Section A — ネットワーク基礎知識（高校情報I・II範囲）: IPアドレス、DNS、HTTP/HTTPS、プロトコル、LAN・WAN、ルーター、ファイアウォール
-Section B — 法人内ITサービス利用経験: 社内システム・グループウェア・VPN・クラウドストレージ・ERPの業務活用度・セキュリティ意識
-Section C — IT経験ヒアリング: プログラミング経験・IT資格・自作PC・副業・制作物・学習姿勢・自走力
+Section A — ネットワーク基礎知識（高校情報I・II範囲）: IPアドレス、DNS、HTTP/HTTPS、プロトコル、LAN・WAN、ルーター、ファイアウォール（3問以内）
+Section B — 法人内ITサービス利用経験: 社内システム・グループウェア・VPN・クラウドストレージ・ERPの業務活用度・セキュリティ意識（3問以内）
+Section C — IT経験ヒアリング: プログラミング経験・IT資格・自作PC・副業・制作物・学習姿勢・自走力（3問以内）
+Section D — 勤務希望ヒアリング: 希望の勤務形態（リモート/出社/ハイブリッド）・勤務地・勤務時間を1〜2問で軽く確認する（採点不要）
 
 ## タグルール（重要）
-- セクション移行時のみ、メッセージ末尾に [SECTION_CHANGE: B] または [SECTION_CHANGE: C] を付ける
-- 全セクション終了時は [INTERVIEW_END] を付けて締めくくる
-- タグはメッセージ末尾に1回だけ付ける`;
+- セクション移行時のみ、メッセージ末尾に [SECTION_CHANGE: B] / [SECTION_CHANGE: C] / [SECTION_CHANGE: D] を付ける
+- 全セクション終了時（Section D完了後）は [INTERVIEW_END] を付けて締めくくる
+- タグはメッセージ末尾に1回だけ付ける${timerHint}`;
 }
 
 function buildMessages(latestUser) {
