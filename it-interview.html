@@ -1340,10 +1340,15 @@ function toggleMic() {
     document.getElementById('micBtn').classList.remove('recording');
     document.getElementById('micBtn').textContent = '🎤';
   } else {
-    // Turn ON: clear previous text and start capturing
+    // Turn ON: reset SpeechRecognition to flush any buffered audio, then start fresh
     S.tr = '';
     document.getElementById('transcriptFinal').textContent = '';
     document.getElementById('transcriptInterim').textContent = '';
+    // abort & restart to discard buffered audio accumulated while mic was "off"
+    if (S.recog) {
+      try { S.recog.abort(); } catch(e) {}
+      // onRecogEnd will restart automatically after abort
+    }
     S.isRec = true;
     document.getElementById('micBtn').classList.add('recording');
     document.getElementById('micBtn').textContent = '⏹';
