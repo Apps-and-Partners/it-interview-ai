@@ -1453,20 +1453,11 @@ function buildSystemPrompt() {
   // ② Timer-based hints to keep interview around 12 minutes
   let timerHint = '';
   if (elapsed >= 660 && elapsed < 720) { // 11〜12分
-    timerHint = '
-
-## 時間の目安
-残り時間がわずかです。現在のセクションを手短に締めて次へ進んでください。';
+    timerHint = '\n\n## 時間の目安\n残り時間がわずかです。現在のセクションを手短に締めて次へ進んでください。';
   } else if (elapsed >= 720) { // 12分以上
-    timerHint = '
-
-## 時間の目安
-まもなく終了です。Section Cが未完なら簡潔に終え、Section Dへ移行するか [INTERVIEW_END] に向かってください。';
+    timerHint = '\n\n## 時間の目安\nまもなく終了です。Section Cが未完なら簡潔に終え、Section Dへ移行するか [INTERVIEW_END] に向かってください。';
   } else if (elapsed >= 540) { // 9〜11分
-    timerHint = '
-
-## 時間の目安
-残り時間が少なくなっています。各セクションはコンパクトにまとめてください。';
+    timerHint = '\n\n## 時間の目安\n残り時間が少なくなっています。各セクションはコンパクトにまとめてください。';
   }
 
   return `あなたはITレベル判定面談の面接官です。
