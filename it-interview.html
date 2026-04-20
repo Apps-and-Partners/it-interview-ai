@@ -1019,16 +1019,7 @@ h1,h2,h3,.title-font { font-family: 'Fredoka One', cursive; }
         <h3>📬 この採点結果で応募する</h3>
         <p>お名前・連絡先を入力してください。採点結果とともに人事担当に送付されます。</p>
 
-        <!-- Salesforce OAuth: 設定はWorkerに隠蔽済み -->
-        <div id="sfAuthArea">
-          <button type="button" class="btn-secondary" style="width:100%;margin-bottom:8px" onclick="sfOAuthLogin()" id="btnSfAuth">
-            🔐 Salesforce でログイン（OAuth）
-          </button>
-          <div class="sf-hint" style="text-align:center" id="sfAuthStatus"></div>
-          <input type="hidden" id="sfAccessToken">
-          <input type="hidden" id="sfClientId">
-          <input type="hidden" id="sfInstance">
-        </div>
+
 
         <div class="apply-name-row">
           <div class="apply-field">
@@ -1091,7 +1082,7 @@ const S = {
   stream: null, mr: null, ch: [], blobs: [],
   isRec: false, recog: null, tr: '', conv: [],
   sec: 'a', timer: null, el: 0,
-  spk: false, wait: false, rate: 1.0, firstTurn: true, _recogRestarting: false, _recogActive: false, lastScore: null, _sfToken: null, _sfInstance: null,
+  spk: false, wait: false, rate: 1.0, firstTurn: true, _recogRestarting: false, _recogActive: false, lastScore: null
   currentText: '', audioQueue: null
 };
 
@@ -1717,129 +1708,16 @@ function toggleApplyForm() {
 //   - "Webサーバーフローの秘密が必要" OFF
 //   - "PKCE拡張を要求" ON
 
-async function sfOAuthLogin() {
-  const authStatus = document.getElementById('sfAuthStatus');
-  authStatus.textContent = '接続情報を取得中...';
-  authStatus.style.color = '#8aab93';
-
-  // Fetch clientId and instanceUrl from Worker (hidden from browser source)
-  let clientId, instance;
-  try {
-    const r = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/sf-config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-    const cfg = await r.json();
-    clientId = cfg.clientId;
-    instance = (cfg.instanceUrl || '').replace(/\/$/, '');
-  } catch(e) {
-    authStatus.textContent = '❌ Worker接続エラー: ' + e.message;
-    authStatus.style.color = '#e53e3e';
-    return;
-  }
-
-  if (!clientId || !instance) {
-    authStatus.textContent = '❌ WorkerにSF_CLIENT_IDとSF_INSTANCE_URLを設定してください';
-    authStatus.style.color = '#e53e3e';
-    return;
-  }
-
-  const verifier  = generateCodeVerifier();
-  const challenge = await generateCodeChallenge(verifier);
-  const state     = Math.random().toString(36).slice(2);
-
-  sessionStorage.setItem('sf_verifier',  verifier);
-  sessionStorage.setItem('sf_state',     state);
-  sessionStorage.setItem('sf_client_id', clientId);
-  sessionStorage.setItem('sf_instance',  instance);
-
-  const redirectUri = location.href.split('?')[0].split('#')[0];
-  const authUrl = `${instance}/services/oauth2/authorize`
-    + `?response_type=code`
-    + `&client_id=${encodeURIComponent(clientId)}`
-    + `&redirect_uri=${encodeURIComponent(redirectUri)}`
-    + `&code_challenge=${encodeURIComponent(challenge)}`
-    + `&code_challenge_method=S256`
-    + `&state=${state}`;
-
-  authStatus.textContent = 'Salesforce 認証画面を開いています...';
-  authStatus.style.color = '#2cb87a';
-  window.location.href = authUrl;
-}
-
-// Called on page load — handles the ?code= callback
-async function handleOAuthCallback() {
-  const params = new URLSearchParams(location.search);
-  const code  = params.get('code');
-  const state = params.get('state');
-  if (!code) return;
-
-  history.replaceState({}, '', location.pathname);
-
-  const verifier   = sessionStorage.getItem('sf_verifier');
-  const savedState = sessionStorage.getItem('sf_state');
-  const clientId   = sessionStorage.getItem('sf_client_id');
-  const instance   = sessionStorage.getItem('sf_instance');
-
-  if (!verifier || state !== savedState) { alert('OAuth state mismatch.'); return; }
-  sessionStorage.removeItem('sf_verifier');
-  sessionStorage.removeItem('sf_state');
-
-  const redirectUri = location.href.split('?')[0].split('#')[0];
-
-  // Token exchange via local proxy (avoids CORS)
-  // proxy.py must be running: python3 proxy.py
-  try {
-    const res = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instance, code, clientId, redirectUri, verifier }),
-    });
-    const data = await res.json();
-    if (data.access_token) {
-      sfAuthSuccess(data.access_token, data.instance_url || instance, clientId);
-    } else {
-      alert('トークン取得失敗: ' + (data.error_description || JSON.stringify(data)));
-    }
-  } catch(e) {
-    alert('プロキシ接続エラー。proxy.py が起動しているか確認してください。\n' + e.message);
-  }
-}
-
-function sfAuthSuccess(accessToken, instanceUrl, clientId) {
-  S._sfToken    = accessToken;
-  S._sfInstance = instanceUrl;
-  document.getElementById('btnSfAuth').textContent = '✅ 認証済み（再ログイン）';
-  document.getElementById('sfAuthStatus').textContent = '認証成功。このまま応募フォームを入力してください。';
-  document.getElementById('sfAuthStatus').style.color = '#2cb87a';
-  showScreen('result');
-  document.getElementById('applyFormWrap').style.display = 'block';
-  setTimeout(() => document.getElementById('applyFormWrap').scrollIntoView({ behavior: 'smooth' }), 300);
-}
-
-// PKCE helpers
-function generateCodeVerifier() {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-}
-async function generateCodeChallenge(verifier) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-}
 
 async function submitToSalesforce() {
-  const lastName   = document.getElementById('applyLastName').value.trim();
-  const firstName  = document.getElementById('applyFirstName').value.trim();
-  const email      = document.getElementById('applyEmail').value.trim();
-  const phone      = document.getElementById('applyPhone').value.trim();
-  const sfToken    = S._sfToken;
-  const sfInstance = S._sfInstance;
-  const status = document.getElementById('submitStatus');
+  const lastName  = document.getElementById('applyLastName').value.trim();
+  const firstName = document.getElementById('applyFirstName').value.trim();
+  const email     = document.getElementById('applyEmail').value.trim();
+  const phone     = document.getElementById('applyPhone').value.trim();
+  const status    = document.getElementById('submitStatus');
 
-  // Validation
   if (!lastName || !firstName) { status.textContent = '❌ 姓・名を入力してください'; status.className = 'submit-status err'; return; }
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { status.textContent = '❌ 正しいメールアドレスを入力してください'; status.className = 'submit-status err'; return; }
-  if (!sfToken || !sfInstance) {
-    status.textContent = '❌ 先に「Salesforce でログイン」してください'; status.className = 'submit-status err'; return;
-  }
 
   const d = S.lastScore || {};
   const description = [
@@ -1868,20 +1746,16 @@ async function submitToSalesforce() {
   status.className = 'submit-status';
 
   try {
-    const res = await fetch(`${sfInstance}/services/data/v59.0/sobjects/Lead/`, {
+    const res = await fetch('https://sf-token-proxy.shunsuke8710.workers.dev/sf-lead', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${sfToken}`,
-      },
-      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload }),
     });
     if (res.ok) {
       showScreen('complete');
     } else {
-      const err = await res.json().catch(() => []);
-      const msg = Array.isArray(err) ? err[0]?.message : JSON.stringify(err);
-      status.textContent = `❌ Salesforce エラー: ${msg}`;
+      const err = await res.json().catch(() => ({}));
+      status.textContent = `❌ エラー: ${err.error || err.detail || JSON.stringify(err)}`;
       status.className = 'submit-status err';
       btn.disabled = false;
     }
@@ -1895,7 +1769,6 @@ async function submitToSalesforce() {
 function restartApp() {
   S.conv = []; S.sec = 'a'; S.el = 0; S.blobs = [];
   S.tr = ''; S.spk = false; S.wait = false; S.firstTurn = true;
-  S._sfToken = null; S._sfInstance = null;
   stopRecognition();
   if (S.timer) clearInterval(S.timer);
   S.isRec = false;
@@ -1906,8 +1779,6 @@ function restartApp() {
 
 // Handle OAuth callback after DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  // OAuth PKCE callback (?code= in URL)
-  if (location.search.includes('code=')) handleOAuthCallback();
   // Debug mode: ?debug=result でダミーデータを使って結果画面を直接表示
   if (location.search.includes('debug=result')) {
     showScreen('result');
